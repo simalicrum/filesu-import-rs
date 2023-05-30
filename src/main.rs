@@ -1,13 +1,16 @@
 extern crate csv;
 extern crate dotenv;
 
+use clap::Parser;
+use console::style;
+// use console::Term;
 use dotenv::dotenv;
+use indicatif::{ProgressBar, ProgressStyle};
 use sqlx::postgres::PgPoolOptions;
 use std::env;
-
-use clap::Parser;
 use std::error::Error;
-use std::io;
+use std::time::Duration;
+// use std::io;
 
 /// Imports a CSV file into the Files Universe database
 #[derive(Parser, Debug)]
@@ -33,11 +36,16 @@ async fn pg_query(
 #[tokio::main]
 async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
     dotenv().ok();
+    let conn_str: String = env::var("PG_LOGIN")?;
     let args = Args::parse();
+    println!("Connecting to database...");
     let pool: sqlx::Pool<sqlx::Postgres> = PgPoolOptions::new()
-    .max_connections(5)
-    .connect("postgres://filesusqladmin:ujp@wdr3KMW7zpr!rmh@bccrc-pr-cc-fu-psql.postgres.database.azure.com/universe").await?;
-    let mut rdr: csv::Reader<io::Stdin> = csv::Reader::from_reader(io::stdin());
+        .max_connections(5)
+        .connect(&conn_str)
+        .await?;
+    println!("Connected to database.");
+    println!("Reading from CSV file {}", style(&args.input).green());
+    let mut rdr: csv::Reader<std::fs::File> = csv::Reader::from_path(&args.input)?;
     let mut query: String = "INSERT INTO files (
         url,
         name,
@@ -55,9 +63,17 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
         .to_owned();
     let mut count: i32 = 0;
     let mut queries: Vec<String> = Vec::new();
+    let pb = ProgressBar::new_spinner();
+    pb.enable_steady_tick(Duration::from_millis(120));
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.blue} {msg}")
+            .unwrap()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+    );
+    let mut total: i32 = 0;
     for result in rdr.records() {
         let record: csv::StringRecord = result?;
-        let account: &str = "bccrcdmgshahlabdb06sa03";
+        let account: &str = &args.account;
         let eventtype: &str = "Microsoft.Storage.BlobCreated";
         let name_vec: Vec<&str> = record[0].split('/').collect();
         let url: String = format!("https://{}.blob.core.windows.net/{}", account, &record[0]);
@@ -75,7 +91,6 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
             &record[8],
             eventtype
         );
-        // println!("{}", query);
         query.push_str(&subquery);
 
         if count == 100 {
@@ -85,13 +100,14 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
             );
             let push_query = query.clone();
             queries.push(push_query);
-            // println!("{:?}", query);
             if queries.len() == 3 {
                 let (_first, _second, _third) = tokio::join!(
                     pg_query(&queries[0], &pool),
                     pg_query(&queries[1], &pool),
                     pg_query(&queries[2], &pool)
                 );
+                total = total + count * 3;
+                pb.set_message(format!("Inserted {} records into the database", total));
                 queries.clear();
             }
             query = "INSERT INTO files (
@@ -119,5 +135,6 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
         );
         count += 1;
     }
+    pb.finish_with_message("Done");
     Ok(())
 }

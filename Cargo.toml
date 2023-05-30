@@ -7,7 +7,9 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.3.0", features = ["derive"] }
+console = "0.15.7"
 csv = "1.2.1"
 dotenv = "0.15.0"
+indicatif = "0.17.4"
 sqlx = { version = "0.6", features = [ "runtime-tokio-rustls", "postgres" ] }
 tokio = { version = "1", features = ["full"] }
