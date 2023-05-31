@@ -103,7 +103,6 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
             ON CONFLICT (url) DO NOTHING",
             );
             let push_query = query.clone();
-            let pool = pool.clone();
             queries.push(push_query);
             if queries.len() == concurrent_connections {
                 let mut fut = Vec::new();
