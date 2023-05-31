@@ -28,9 +28,11 @@ struct Args {
 async fn pg_query(
     query: &String,
     pool: &sqlx::Pool<sqlx::Postgres>,
-) -> Result<sqlx::postgres::PgQueryResult, Box<(dyn Error + 'static)>> {
-    let result: sqlx::postgres::PgQueryResult = sqlx::query(query).execute(pool).await?;
-    Ok(result)
+) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    // let qcopy = query.clone();
+    let result: Result<sqlx::postgres::PgQueryResult, sqlx::Error> =
+        sqlx::query(&query).execute(pool).await;
+    result
 }
 
 #[tokio::main]
@@ -99,13 +101,21 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
             ON CONFLICT (url) DO NOTHING",
             );
             let push_query = query.clone();
+            let pool = pool.clone();
             queries.push(push_query);
             if queries.len() == 3 {
-                let (_first, _second, _third) = tokio::join!(
-                    pg_query(&queries[0], &pool),
-                    pg_query(&queries[1], &pool),
-                    pg_query(&queries[2], &pool)
-                );
+                let mut fut = Vec::new();
+                for i in 0..3 {
+                    let q = queries[i].clone();
+                    let pool = pool.clone();
+                    let t = tokio::spawn(async move {
+                        let res = pg_query(&q, &pool).await;
+                    });
+                    fut.push(t);
+                }
+                for f in fut {
+                    f.await?;
+                }
                 total = total + count * 3;
                 pb.set_message(format!("Inserted {} records into the database", total));
                 queries.clear();
