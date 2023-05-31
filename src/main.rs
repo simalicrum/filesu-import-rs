@@ -7,14 +7,9 @@ use console::style;
 use dotenv::dotenv;
 use indicatif::{ProgressBar, ProgressStyle};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::postgres::PgQueryResult;
-use sqlx::Database;
-use sqlx::Postgres;
 use std::env;
 use std::error::Error;
-use std::future::Future;
 use std::time::Duration;
-use tokio::task::JoinSet;
 // use std::io;
 
 /// Imports a CSV file into the Files Universe database
@@ -30,11 +25,12 @@ struct Args {
     account: String,
 }
 
-async fn pg_query<'a>(
-    query: &'a String,
-    pool: &'a sqlx::Pool<sqlx::Postgres>,
-) -> impl 'a + Future<Output = Result<<Postgres as Database>::QueryResult, sqlx::Error>> {
-    sqlx::query(query).execute(pool)
+async fn pg_query(
+    query: &String,
+    pool: &sqlx::Pool<sqlx::Postgres>,
+) -> Result<sqlx::postgres::PgQueryResult, Box<(dyn Error + 'static)>> {
+    let result: sqlx::postgres::PgQueryResult = sqlx::query(query).execute(pool).await?;
+    Ok(result)
 }
 
 #[tokio::main]
@@ -105,15 +101,11 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
             let push_query = query.clone();
             queries.push(push_query);
             if queries.len() == 3 {
-                let mut join_set = JoinSet::new();
-                for query in queries {
-                    join_set.spawn(pg_query(&query, &pool));
-                }
-                // let (_first, _second, _third) = tokio::join!(
-                //     pg_query(&queries[0], &pool),
-                //     pg_query(&queries[1], &pool),
-                //     pg_query(&queries[2], &pool)
-                // );
+                let (_first, _second, _third) = tokio::join!(
+                    pg_query(&queries[0], &pool),
+                    pg_query(&queries[1], &pool),
+                    pg_query(&queries[2], &pool)
+                );
                 total = total + count * 3;
                 pb.set_message(format!("Inserted {} records into the database", total));
                 queries.clear();
