@@ -105,9 +105,9 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
             let push_query = query.clone();
             queries.push(push_query);
             if queries.len() == 3 {
-                let mut join_set: JoinSet<()> = JoinSet::new();
+                let mut join_set = JoinSet::new();
                 for query in queries {
-                    join_set.spawn(sqlx::query(&query).execute(&pool));
+                    join_set.spawn(pg_query(&query, &pool));
                 }
                 // let (_first, _second, _third) = tokio::join!(
                 //     pg_query(&queries[0], &pool),
