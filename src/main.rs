@@ -38,12 +38,14 @@ async fn pg_query(
 #[tokio::main]
 async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
     dotenv().ok();
-    let conn_str: String = env::var("PG_LOGIN")?;
+    let connection_string: String = env::var("PG_LOGIN")?;
+    let concurrent_connections: usize = env::var("PG_CONN").unwrap().parse::<usize>()?;
+    let batch_size: i32 = env::var("BATCH_SIZE").unwrap().parse::<i32>()?;
     let args = Args::parse();
     println!("Connecting to database...");
     let pool: sqlx::Pool<sqlx::Postgres> = PgPoolOptions::new()
         .max_connections(5)
-        .connect(&conn_str)
+        .connect(&connection_string)
         .await?;
     println!("Connected to database.");
     println!("Reading from CSV file {}", style(&args.input).green());
@@ -95,7 +97,7 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
         );
         query.push_str(&subquery);
 
-        if count == 100 {
+        if count == batch_size {
             query.push_str(
                 "
             ON CONFLICT (url) DO NOTHING",
@@ -103,20 +105,20 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
             let push_query = query.clone();
             let pool = pool.clone();
             queries.push(push_query);
-            if queries.len() == 3 {
+            if queries.len() == concurrent_connections {
                 let mut fut = Vec::new();
-                for i in 0..3 {
-                    let q = queries[i].clone();
+                for i in 0..concurrent_connections {
+                    let query = queries[i].clone();
                     let pool = pool.clone();
                     let t = tokio::spawn(async move {
-                        let res = pg_query(&q, &pool).await;
+                        let res = pg_query(&query, &pool).await;
                     });
                     fut.push(t);
                 }
                 for f in fut {
                     f.await?;
                 }
-                total = total + count * 3;
+                total = total + count * concurrent_connections as i32;
                 pb.set_message(format!("Inserted {} records into the database", total));
                 queries.clear();
             }
