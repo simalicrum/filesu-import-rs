@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
                     let query = queries[i].clone();
                     let pool = pool.clone();
                     let t = tokio::spawn(async move {
-                        let res = pg_query(&query, &pool).await;
+                        let _res = pg_query(&query, &pool).await;
                     });
                     fut.push(t);
                 }
