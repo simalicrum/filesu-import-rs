@@ -35,7 +35,6 @@ async fn pg_query(
     query: &String,
     pool: &sqlx::Pool<sqlx::Postgres>,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
-    // let qcopy = query.clone();
     let result: Result<sqlx::postgres::PgQueryResult, sqlx::Error> =
         sqlx::query(&query).execute(pool).await;
     result
@@ -99,12 +98,12 @@ async fn import_from_csv(
             &record[0],
             account,
             container,
-            "",
-            &record[3],
-            &record[4],
-            &record[5],
-            &record[6],
             &record[8],
+            &record[1],
+            &record[2],
+            &record[3],
+            &record[5],
+            &record[7],
             eventtype
         );
         query.push_str(&subquery);
@@ -122,7 +121,13 @@ async fn import_from_csv(
                     let query = queries[i].clone();
                     let pool = pool.clone();
                     let t = tokio::spawn(async move {
-                        let _res = pg_query(&query, &pool).await;
+                        let res = pg_query(&query, &pool).await;
+                        match res {
+                            Ok(_) => {}
+                            Err(e) => {
+                                println!("Error: {}", e);
+                            }
+                        }
                     });
                     fut.push(t);
                 }
@@ -171,7 +176,7 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
     let args = Args::parse();
     println!("Connecting to database...");
     let pool: sqlx::Pool<sqlx::Postgres> = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(50)
         .connect(&connection_string)
         .await?;
     println!("Connected to database.");
@@ -192,7 +197,7 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
             for line in lines {
                 let line = line.unwrap();
                 let filename = Path::new(&line).file_stem().unwrap().to_str().unwrap();
-                let re = Regex::new(r"(.*)-(.*)").unwrap();
+                let re = Regex::new(r"(.*?)-(.*)").unwrap();
                 let caps = re.captures(filename).unwrap();
                 let account = caps.get(1).unwrap().as_str();
                 let container = caps.get(2).unwrap().as_str();
