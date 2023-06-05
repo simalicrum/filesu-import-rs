@@ -6,11 +6,13 @@ use console::style;
 // use console::Term;
 use dotenv::dotenv;
 use indicatif::{ProgressBar, ProgressStyle};
+use regex::Regex;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use std::error::Error;
+use std::io;
+use std::path::Path;
 use std::time::Duration;
-// use std::io;
 
 /// Imports a CSV file into the Files Universe database
 #[derive(Parser, Debug)]
@@ -18,11 +20,15 @@ use std::time::Duration;
 struct Args {
     /// CSV file to read
     #[arg(short, long)]
-    input: String,
+    input: Option<String>,
 
     /// Storage account name of the CSV file
     #[arg(short, long)]
-    account: String,
+    account: Option<String>,
+
+    /// Storage container name of the CSV file
+    #[arg(short, long)]
+    container: Option<String>,
 }
 
 async fn pg_query(
@@ -35,21 +41,16 @@ async fn pg_query(
     result
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
-    dotenv().ok();
-    let connection_string: String = env::var("PG_LOGIN")?;
-    let concurrent_connections: usize = env::var("PG_CONN").unwrap().parse::<usize>()?;
-    let batch_size: i32 = env::var("BATCH_SIZE").unwrap().parse::<i32>()?;
-    let args = Args::parse();
-    println!("Connecting to database...");
-    let pool: sqlx::Pool<sqlx::Postgres> = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&connection_string)
-        .await?;
-    println!("Connected to database.");
-    println!("Reading from CSV file {}", style(&args.input).green());
-    let mut rdr: csv::Reader<std::fs::File> = csv::Reader::from_path(&args.input)?;
+async fn import_from_csv(
+    line: &str,
+    account: &str,
+    container: &str,
+    batch_size: i32,
+    concurrent_connections: usize,
+    pool: &sqlx::Pool<sqlx::Postgres>,
+) -> Result<(), Box<(dyn Error + 'static)>> {
+    println!("Reading from CSV file {}", style(line).green());
+    let mut rdr: csv::Reader<std::fs::File> = csv::Reader::from_path(line)?;
     let mut query: String = "INSERT INTO files (
         url,
         name,
@@ -72,21 +73,32 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
     pb.set_style(
         ProgressStyle::with_template("{spinner:.blue} {msg}")
             .unwrap()
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+            .tick_strings(&[
+                "⠋",
+                "⠙",
+                "⠹",
+                "⠸",
+                "⠼",
+                "⠴",
+                "⠦",
+                "⠧",
+                "⠇",
+                "⠏",
+                &style("✔").green().to_string(),
+            ]),
     );
     let mut total: i32 = 0;
     for result in rdr.records() {
         let record: csv::StringRecord = result?;
-        let account: &str = &args.account;
+
         let eventtype: &str = "Microsoft.Storage.BlobCreated";
-        let name_vec: Vec<&str> = record[0].split('/').collect();
         let url: String = format!("https://{}.blob.core.windows.net/{}", account, &record[0]);
         let subquery: String = format!(
             "('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}')",
             url,
             &record[0],
             account,
-            name_vec[0],
+            container,
             "",
             &record[3],
             &record[4],
@@ -147,5 +159,58 @@ async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
         count += 1;
     }
     pb.finish_with_message("Done");
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<(dyn Error + 'static)>> {
+    dotenv().ok();
+    let connection_string: String = env::var("PG_LOGIN")?;
+    let concurrent_connections: usize = env::var("PG_CONN").unwrap().parse::<usize>()?;
+    let batch_size: i32 = env::var("BATCH_SIZE").unwrap().parse::<i32>()?;
+    let args = Args::parse();
+    println!("Connecting to database...");
+    let pool: sqlx::Pool<sqlx::Postgres> = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&connection_string)
+        .await?;
+    println!("Connected to database.");
+    match (args.container, args.account, args.input) {
+        (Some(container), Some(account), Some(input)) => {
+            let _ = import_from_csv(
+                &input,
+                &account,
+                &container,
+                batch_size,
+                concurrent_connections,
+                &pool,
+            )
+            .await;
+        }
+        (None, None, None) => {
+            let lines = io::stdin().lines();
+            for line in lines {
+                let line = line.unwrap();
+                let filename = Path::new(&line).file_stem().unwrap().to_str().unwrap();
+                let re = Regex::new(r"(.*)-(.*)").unwrap();
+                let caps = re.captures(filename).unwrap();
+                let account = caps.get(1).unwrap().as_str();
+                let container = caps.get(2).unwrap().as_str();
+                let _ = import_from_csv(
+                    &line,
+                    account,
+                    container,
+                    batch_size,
+                    concurrent_connections,
+                    &pool,
+                )
+                .await;
+            }
+        }
+        (_, _, _) => {
+            println!("Please specify container and account and input file when using args");
+            std::process::exit(1);
+        }
+    }
     Ok(())
 }
