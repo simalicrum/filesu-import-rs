@@ -50,7 +50,7 @@ async fn import_from_csv(
 ) -> Result<(), Box<(dyn Error + 'static)>> {
     println!("Reading from CSV file {}", style(line).green());
     let mut rdr: csv::Reader<std::fs::File> = csv::Reader::from_path(line)?;
-    let mut query: String = "INSERT INTO files (
+    let mut query: String = "INSERT INTO files as f (
         url,
         name,
         account,
@@ -61,7 +61,8 @@ async fn import_from_csv(
         contentlength,
         contentmd5,
         accesstier,
-        eventtype
+        eventtype,
+        eventtime
     )
     VALUES "
         .to_owned();
@@ -93,7 +94,7 @@ async fn import_from_csv(
         let eventtype: &str = "Microsoft.Storage.BlobCreated";
         let url: String = format!("https://{}.blob.core.windows.net/{}", account, &record[0]);
         let subquery: String = format!(
-            "('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}')",
+            "('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}')",
             url,
             &record[0],
             account,
@@ -104,15 +105,24 @@ async fn import_from_csv(
             &record[3],
             &record[5],
             &record[7],
-            eventtype
+            eventtype,
+            &record[2]
         );
         query.push_str(&subquery);
 
         if count == batch_size {
             query.push_str(
                 "
-            ON CONFLICT (url) DO NOTHING",
+            ON CONFLICT (url) DO
+            UPDATE SET
+              resourcetype = COALESCE(EXCLUDED.resourcetype, f.resourcetype),
+              createdon = COALESCE(EXCLUDED.createdon, f.createdon),
+              lastmodified = COALESCE(EXCLUDED.lastmodified, f.lastmodified),
+              contentlength = COALESCE(EXCLUDED.contentlength, f.contentlength),
+              contentmd5 = COALESCE(EXCLUDED.contentmd5, f.contentmd5),
+              accesstier = COALESCE(EXCLUDED.accesstier, f.accesstier)",
             );
+            // println!("query: {}", query);
             let push_query = query.clone();
             queries.push(push_query);
             if queries.len() == concurrent_connections {
@@ -126,6 +136,8 @@ async fn import_from_csv(
                             Ok(_) => {}
                             Err(e) => {
                                 println!("Error: {}", e);
+                                println!("Query: {}", query);
+                                ()
                             }
                         }
                     });
@@ -138,7 +150,7 @@ async fn import_from_csv(
                 pb.set_message(format!("Inserted {} records into the database", total));
                 queries.clear();
             }
-            query = "INSERT INTO files (
+            query = "INSERT INTO files as f (
                 url,
                 name,
                 account,
@@ -149,7 +161,8 @@ async fn import_from_csv(
                 contentlength,
                 contentmd5,
                 accesstier,
-                eventtype
+                eventtype,
+                eventtime
             )
             VALUES "
                 .to_owned();
