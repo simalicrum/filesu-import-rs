@@ -92,7 +92,10 @@ async fn import_from_csv(
         let record: csv::StringRecord = result?;
 
         let eventtype: &str = "Microsoft.Storage.BlobCreated";
-        let url: String = format!("https://{}.blob.core.windows.net/{}", account, &record[0]);
+        let url: String = format!(
+            "https://{}.blob.core.windows.net/{}/{}",
+            account, container, &record[0]
+        );
         let subquery: String = format!(
             "('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}')",
             url,
@@ -115,12 +118,12 @@ async fn import_from_csv(
                 "
             ON CONFLICT (url) DO
             UPDATE SET
-              resourcetype = COALESCE(EXCLUDED.resourcetype, f.resourcetype),
-              createdon = COALESCE(EXCLUDED.createdon, f.createdon),
-              lastmodified = COALESCE(EXCLUDED.lastmodified, f.lastmodified),
-              contentlength = COALESCE(EXCLUDED.contentlength, f.contentlength),
-              contentmd5 = COALESCE(EXCLUDED.contentmd5, f.contentmd5),
-              accesstier = COALESCE(EXCLUDED.accesstier, f.accesstier)",
+              resourcetype = COALESCE(f.resourcetype, EXCLUDED.resourcetype),
+              createdon = COALESCE(f.createdon, EXCLUDED.createdon),
+              lastmodified = COALESCE(f.lastmodified, EXCLUDED.lastmodified),
+              contentlength = COALESCE(f.contentlength, EXCLUDED.contentlength),
+              contentmd5 = COALESCE(f.contentmd5, EXCLUDED.contentmd5),
+              accesstier = COALESCE(f.accesstier, EXCLUDED.accesstier)",
             );
             // println!("query: {}", query);
             let push_query = query.clone();
