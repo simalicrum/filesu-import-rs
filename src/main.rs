@@ -90,16 +90,16 @@ async fn import_from_csv(
     let mut total: i32 = 0;
     for result in rdr.records() {
         let record: csv::StringRecord = result?;
-
+        let esc_name = str::replace(&record[0], "'", "''");
         let eventtype: &str = "Microsoft.Storage.BlobCreated";
         let url: String = format!(
             "https://{}.blob.core.windows.net/{}/{}",
-            account, container, &record[0]
+            account, container, esc_name
         );
         let subquery: String = format!(
             "('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}')",
             url,
-            &record[0],
+            esc_name,
             account,
             container,
             &record[8],
